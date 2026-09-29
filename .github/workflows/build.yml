@@ -1,0 +1,32 @@
+name: Build
+
+# Prüft bei jedem Push, dass App und Plugin bauen. Installiert wird lokal per `make install`.
+on:
+  push:
+  pull_request:
+
+jobs:
+  app:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift-Version
+        run: swift --version
+      - name: App kompilieren
+        run: swift build -c release
+
+  plugin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npx streamdeck validate de.schuchert.funk.sdPlugin

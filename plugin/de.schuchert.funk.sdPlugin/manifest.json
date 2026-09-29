@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "UUID": "de.schuchert.funk",
+  "Name": "Funk",
+  "Version": "1.0.0.0",
+  "Author": "David Schuchert",
+  "Description": "Push-to-Talk Gegensprechanlage zwischen zwei Macs im selben Netzwerk. Benötigt die Funk-App in der Menüleiste.",
+  "Icon": "imgs/plugin",
+  "Category": "Funk",
+  "CategoryIcon": "imgs/category",
+  "CodePath": "bin/plugin.js",
+  "SDKVersion": 3,
+  "Software": {
+    "MinimumVersion": "7.1"
+  },
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "14"
+    }
+  ],
+  "Nodejs": {
+    "Version": "24"
+  },
+  "Actions": [
+    {
+      "UUID": "de.schuchert.funk.talk",
+      "Name": "Sprechtaste",
+      "Tooltip": "Halten zum Sprechen",
+      "Icon": "imgs/action",
+      "Controllers": [
+        "Keypad"
+      ],
+      "SupportedInMultiActions": false,
+      "UserTitleEnabled": false,
+      "States": [
+        {
+          "Image": "imgs/key",
+          "ShowTitle": false
+        }
+      ]
+    }
+  ]
+}

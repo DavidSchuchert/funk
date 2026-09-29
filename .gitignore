@@ -1,0 +1,8 @@
+.DS_Store
+/build/
+/.build/
+/.swiftpm/
+*.xcodeproj/
+plugin/node_modules/
+plugin/de.schuchert.funk.sdPlugin/bin/
+plugin/de.schuchert.funk.sdPlugin/logs/

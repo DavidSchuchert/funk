@@ -1,0 +1,26 @@
+{
+  "name": "funk-streamdeck-plugin",
+  "version": "1.0.0",
+  "description": "Stream-Deck-Sprechtaste für Funk",
+  "scripts": {
+    "build": "rollup -c",
+    "pack": "streamdeck pack de.schuchert.funk.sdPlugin -o .. -f"
+  },
+  "author": "David Schuchert",
+  "license": "MIT",
+  "dependencies": {
+    "@elgato/streamdeck": "^3.0.1"
+  },
+  "devDependencies": {
+    "@elgato/cli": "^1.10.1",
+    "@rollup/plugin-commonjs": "^29.0.3",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^1.0.0",
+    "@rollup/plugin-typescript": "^12.3.0",
+    "@types/node": "^24.19.0",
+    "rollup": "^4.63.5",
+    "tslib": "^2.8.1",
+    "typescript": "^5.9.3"
+  },
+  "private": true
+}

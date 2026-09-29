@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>de.schuchert.funk</string>
+  <key>CFBundleName</key><string>Funk</string>
+  <key>CFBundleDisplayName</key><string>Funk</string>
+  <key>CFBundleExecutable</key><string>Funk</string>
+  <key>CFBundleIconFile</key><string>Funk</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>0.0.0</string>
+  <key>CFBundleVersion</key><string>0</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+  <key>LSUIElement</key><true/>
+  <key>NSHumanReadableCopyright</key><string>© David Schuchert, MIT-Lizenz</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Funk überträgt deine Stimme an den anderen Mac, solange du die Sprechtaste hältst.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Funk sucht den anderen Mac im Heimnetz und schickt ihm das Audio direkt.</string>
+  <key>NSBonjourServices</key>
+  <array><string>_dbefunk._udp</string></array>
+</dict>
+</plist>

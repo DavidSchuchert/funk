@@ -32,6 +32,8 @@ struct MenuView: View {
             header
             if !model.isInApplications { locationWarning }
             if model.micDenied { micWarning }
+            if model.status.audioFailed { audioFailedWarning }
+            else if !model.status.echoCancellation { echoWarning }
             Divider()
             receiveSection
             Divider()
@@ -66,6 +68,25 @@ struct MenuView: View {
             Label("Funk liegt nicht im Programme-Ordner", systemImage: "folder.badge.questionmark")
                 .foregroundStyle(.orange)
             Text("Bitte Funk beenden, nach Programme ziehen und von dort starten. Sonst funktioniert \"Beim Login starten\" nicht.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var audioFailedWarning: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Audio startet nicht", systemImage: "speaker.slash.fill").foregroundStyle(.red)
+            Text("Prüfe in den Ton-Einstellungen Ein- und Ausgabegerät. Details stehen im Log.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var echoWarning: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Ohne Echo-Unterdrückung", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text("Ein- und Ausgabegerät passen für macOS nicht zusammen. Funk läuft, aber über Lautsprecher kann es hallen, und andere Apps werden nicht leiser. Abhilfe: Kopfhörer oder dasselbe Gerät für Ein- und Ausgabe.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

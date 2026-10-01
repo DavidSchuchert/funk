@@ -109,6 +109,8 @@ final class FunkCore {
         s.receiving = link.receiving
         s.muted = settings.muted
         s.pluginConnected = control.connected
+        s.echoCancellation = audio.mode != .plain
+        s.audioFailed = audio.failed
 
         // Funk-Piep, sobald der Partner die Taste drückt (Statuspaket kommt vor dem Audio).
         let partnerTalking = partner?.talking ?? false

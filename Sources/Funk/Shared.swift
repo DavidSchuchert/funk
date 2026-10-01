@@ -52,6 +52,8 @@ struct FunkStatus: Equatable {
     var receiving = false
     var muted = false
     var pluginConnected = false
+    var echoCancellation = true      // false: Rückfall ohne Voice Processing
+    var audioFailed = false          // Audio-Engine startet gar nicht
 
     var partnerOnline: Bool { partnerName != nil }
 

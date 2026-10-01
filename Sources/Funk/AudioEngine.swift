@@ -24,7 +24,19 @@ final class AudioEngine {
     private var sendAccum = Data()
     let sendEnabled = AtomicFlag()
 
+    /// Wie die Engine betrieben wird. Voice Processing scheitert unter macOS, wenn Ein- und
+    /// Ausgabegerät nicht zusammenpassen (z. B. AirPods-Mikro + MacBook-Lautsprecher, Fehler -10875).
+    /// Dann fallen wir stufenweise zurück, statt stumm zu bleiben.
+    enum Mode: String {
+        case voiceProcessing          // normal: Echo Cancellation + Ducking
+        case voiceProcessingMatched   // VP, Ausgabeformat ans Eingangsformat angeglichen
+        case plain                    // ohne VP: Ton geht, aber kein Echo-Schutz, kein Ducking
+    }
+
     // funkQueue
+    private(set) var mode: Mode = .voiceProcessing
+    private(set) var failed = false               // auch der letzte Rückfall hat nicht geklappt
+    private var ignoreConfigChangesUntil = Date.distantPast
     private(set) var running = false
     private var queuedFrames: AVAudioFrameCount = 0
     private var lastActivity = Date.distantPast
@@ -42,14 +54,23 @@ final class AudioEngine {
     }
 
     func setup() {
-        do {
-            let input = engine.inputNode
-            if !input.isVoiceProcessingEnabled { try input.setVoiceProcessingEnabled(true) }
-        } catch {
-            warn("Voice Processing nicht verfügbar: \(error)")
-        }
-        applyDucking()
+        setVoiceProcessing(true)
         wireGraph()
+    }
+
+    /// VP an- oder ausschalten. Das löst selbst eine Konfigurationsänderung aus, die wir
+    /// kurz ignorieren, sonst würde configurationChanged() den Rückfall gleich wieder zurücksetzen.
+    private func setVoiceProcessing(_ on: Bool) {
+        let input = engine.inputNode
+        guard input.isVoiceProcessingEnabled != on else { if on { applyDucking() }; return }
+        ignoreConfigChangesUntil = Date().addingTimeInterval(1)
+        do {
+            try input.setVoiceProcessingEnabled(on)
+            note("Voice Processing \(on ? "an" : "aus")")
+        } catch {
+            warn("Voice Processing \(on ? "an" : "aus") fehlgeschlagen: \(error)")
+        }
+        if on { applyDucking() }
     }
 
     // MARK: Einstellungen
@@ -65,6 +86,7 @@ final class AudioEngine {
     }
 
     private func applyDucking() {
+        guard engine.inputNode.isVoiceProcessingEnabled else { return }
         var cfg = engine.inputNode.voiceProcessingOtherAudioDuckingConfiguration
         cfg.enableAdvancedDucking = false
         switch ducking {
@@ -88,7 +110,14 @@ final class AudioEngine {
         engine.connect(effects, to: engine.mainMixerNode, format: playFormat)
 
         let inFormat = input.outputFormat(forBus: 0)
-        note("Eingang: \(inFormat)")
+        engine.disconnectNodeInput(engine.outputNode)
+        if mode == .voiceProcessingMatched, inFormat.sampleRate > 0 {
+            // VP verlangt gleiche Client-Formate für Ein- und Ausgabe.
+            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: inFormat)
+        } else {
+            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: nil)
+        }
+        note("Modus \(mode.rawValue), Eingang: \(inFormat), Ausgang: \(engine.outputNode.outputFormat(forBus: 0))")
         converter = nil
         sendAccum.removeAll()
         guard inFormat.sampleRate > 0, inFormat.channelCount > 0 else {
@@ -105,9 +134,13 @@ final class AudioEngine {
     }
 
     private func configurationChanged() {
-        note("Audiogeräte geändert, baue Engine neu auf")
+        guard Date() >= ignoreConfigChangesUntil else { return }
+        note("Audiogeräte geändert, versuche es wieder mit Voice Processing")
         let wasRunning = running
         stop()
+        mode = .voiceProcessing          // neue Geräte, neue Chance
+        failed = false
+        setVoiceProcessing(true)
         wireGraph()
         if wasRunning || keepAlive() { touch() }
     }
@@ -150,15 +183,38 @@ final class AudioEngine {
     func touch() {
         lastActivity = Date()
         guard !running else { return }
+        if tryStart() { return }
+        ignoreConfigChangesUntil = Date().addingTimeInterval(1)   // fehlgeschlagene Starts melden auch Änderungen
+
+        // Rückfallkette. Ein Modus, der einmal geklappt hat, bleibt bis zum nächsten Gerätewechsel.
+        if mode == .voiceProcessing {
+            mode = .voiceProcessingMatched
+            wireGraph()
+            if tryStart() { return }
+        }
+        if mode == .voiceProcessingMatched {
+            mode = .plain
+            setVoiceProcessing(false)
+            wireGraph()
+            if tryStart() { return }
+        }
+        failed = true
+    }
+
+    private func tryStart() -> Bool {
         do {
             try engine.start()
             voice.play()
             effects.play()
             running = true
-            note("Engine an")
+            failed = false
+            note("Engine an (Modus \(mode.rawValue))")
             scheduleIdleCheck()
+            return true
         } catch {
-            warn("Engine-Start fehlgeschlagen: \(error)")
+            warn("Engine-Start fehlgeschlagen (Modus \(mode.rawValue)): \(error)")
+            engine.stop()
+            return false
         }
     }
 

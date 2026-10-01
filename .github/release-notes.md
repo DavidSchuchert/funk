@@ -1,6 +1,6 @@
 ## Installation
 
-1. **Funk-x.y.z.dmg** unten herunterladen und öffnen.
+1. **Funk-x.y.z.dmg** unten herunterladen und öffnen. Das DMG öffnet sich ohne Rückfrage.
 2. **Funk** auf **Programme** ziehen.
 3. Funk aus dem Programme-Ordner starten. Beim ersten Mal blockt macOS die App, weil sie
    nicht von Apple notarisiert ist. Dann: **Systemeinstellungen → Datenschutz & Sicherheit →

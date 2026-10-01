@@ -45,7 +45,9 @@ dmg: app
 	@ln -s /Applications build/dmg/Programme
 	hdiutil create -volname "$(APP_NAME) $(VERSION)" -srcfolder build/dmg -ov -format UDZO \
 		"build/$(APP_NAME)-$(VERSION).dmg"
-	codesign --force --sign "$(IDENTITY)" "build/$(APP_NAME)-$(VERSION).dmg"
+	@# Das DMG bewusst NICHT signieren: Ein signiertes DMG prüft Gatekeeper wie eine App
+	@# und blockt es, weil das Zertifikat nicht von Apple ist. Unsigniert wird es einfach
+	@# geöffnet, geprüft wird dann nur die (signierte) App beim ersten Start.
 	@rm -rf build/dmg
 	@echo "==> build/$(APP_NAME)-$(VERSION).dmg fertig"
 

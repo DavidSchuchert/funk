@@ -1,17 +1,17 @@
 name: Build
 
-# Prüft bei jedem Push, dass App und Plugin bauen. Installiert wird lokal per `make install`.
+# Prüft bei jedem Push, dass App und Plugin bauen.
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   app:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
-      - name: Swift-Version
-        run: swift --version
+      - uses: actions/checkout@v5
       - name: App kompilieren
         run: swift build -c release
 
@@ -21,8 +21,8 @@ jobs:
       run:
         working-directory: plugin
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm

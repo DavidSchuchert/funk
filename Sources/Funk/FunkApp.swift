@@ -30,6 +30,7 @@ struct MenuView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+            if !model.isInApplications { locationWarning }
             if model.micDenied { micWarning }
             Divider()
             receiveSection
@@ -57,6 +58,16 @@ struct MenuView: View {
                     Text("Partner hat Nicht stören an").font(.caption).foregroundStyle(.orange)
                 }
             }
+        }
+    }
+
+    private var locationWarning: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Funk liegt nicht im Programme-Ordner", systemImage: "folder.badge.questionmark")
+                .foregroundStyle(.orange)
+            Text("Bitte Funk beenden, nach Programme ziehen und von dort starten. Sonst funktioniert \"Beim Login starten\" nicht.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

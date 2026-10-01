@@ -10,39 +10,59 @@ Wie ein Funkgerät, nur im Vollduplex: Ihr könnt auch gleichzeitig reden.
 - Findet den anderen Mac automatisch per Bonjour, keine IP-Adressen nötig
 - Menüleisten-App, startet beim Login, kein Dock-Icon
 
-Voraussetzungen: macOS 14 oder neuer, Xcode Command Line Tools.
-Für das Stream-Deck-Plugin die Stream Deck App ab 7.1.
+Voraussetzungen: macOS 14 oder neuer. Für das Stream-Deck-Plugin die Stream Deck App ab 7.1.
 
 ## Installation
 
-Auf beiden Macs:
+1. Unter [Releases](https://github.com/DavidSchuchert/funk/releases/latest) das DMG herunterladen.
+2. **Funk** auf **Programme** ziehen und von dort starten.
+3. Beim ersten Start blockt macOS die App, weil sie nicht von Apple notarisiert ist:
+   **Systemeinstellungen → Datenschutz & Sicherheit → "Trotzdem öffnen"**. Nur einmal nötig.
+4. **Mikrofon** und **lokales Netzwerk** erlauben.
+5. Im Menü auf **Plugin installieren** klicken, dann in der Stream-Deck-App
+   *Funk → Sprechtaste* auf eine Taste ziehen.
+
+**Update:** neues DMG, Funk beenden, neue Version nach Programme ziehen und ersetzen.
+Die Mikrofonfreigabe bleibt erhalten, weil jede Version mit demselben Zertifikat signiert ist.
+
+### Warum "Trotzdem öffnen"?
+
+Funk ist mit einem eigenen Zertifikat signiert, nicht mit einer Apple Developer ID.
+Für die Mikrofonfreigabe ist das gleichwertig: macOS erkennt die App über Updates hinweg
+wieder. Nur Gatekeeper kennt das Zertifikat nicht und fragt deshalb einmal nach.
+
+## Aus dem Quellcode bauen
+
+Mit Xcode Command Line Tools (`xcode-select --install`):
 
 ```bash
-xcode-select --install          # falls noch nicht vorhanden
 git clone https://github.com/DavidSchuchert/funk.git
 cd funk
 make install
 ```
 
-Beim ersten Start fragt macOS nach **Mikrofon** und **lokalem Netzwerk**: beides erlauben.
-Danach im Menü auf **Plugin installieren** klicken und die Aktion *Funk → Sprechtaste*
-auf eine Stream-Deck-Taste ziehen.
+Ohne Release-Zertifikat im Schlüsselbund legt `make` ein lokales an. Dann ist ein selbst
+gebauter Funk für macOS eine andere App als die aus dem DMG und fragt erneut nach dem Mikrofon.
 
-Beim allerersten `make install` legt das Makefile ein lokales Signaturzertifikat an
-(*Funk Local Signing*). Fragt macOS dabei nach dem Schlüsselbund: **Immer erlauben**.
+`make uninstall` entfernt App, Einstellungen und Mikrofonfreigabe.
 
-### Update
+## Release erstellen
+
+Einmalig das Signaturzertifikat erzeugen und als Repo-Secret ablegen
+(braucht die angemeldete GitHub CLI, läuft auf macOS und in Git Bash unter Windows):
 
 ```bash
-git pull && make install
+scripts/create-signing-certificate.sh
 ```
 
-Die Mikrofonfreigabe bleibt erhalten, weil jede Version mit demselben Zertifikat signiert ist.
+Die erzeugte `.p12` und das Passwort im Passwortmanager sichern. Geht das Zertifikat verloren,
+fragt macOS nach dem nächsten Update wieder nach dem Mikrofon, sonst passiert nichts.
 
-### Deinstallation
+Danach erzeugt jeder Versions-Tag automatisch ein Release mit DMG:
 
 ```bash
-make uninstall
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 ## Anzeige
@@ -79,6 +99,7 @@ Sources/Funk/     Swift-App (SwiftUI MenuBarExtra)
 plugin/           Stream-Deck-Plugin (TypeScript, @elgato/streamdeck)
 Resources/        Info.plist, Icon, gepacktes Plugin
 scripts/          Signaturzertifikat, Aufräumen alter Versionen
+.github/          CI-Build bei jedem Push, Release-DMG bei jedem Tag
 ```
 
 ## Entwicklung

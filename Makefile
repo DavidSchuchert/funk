@@ -1,6 +1,7 @@
 # Funk: Menüleisten-Gegensprechanlage für zwei Macs
 #
 #   make install     bauen, signieren, nach /Applications, starten
+#   make dmg         build/Funk-<Version>.dmg erzeugen (macht der Release-Workflow)
 #   make             nur bauen (build/Funk.app)
 #   make run         bauen und direkt aus build/ starten
 #   make uninstall   App, Einstellungen und Freigaben entfernen
@@ -10,11 +11,11 @@ APP_NAME    := Funk
 BUNDLE_ID   := de.schuchert.funk
 BUNDLE      := build/$(APP_NAME).app
 INSTALL_DIR := /Applications
-IDENTITY    := Funk Local Signing
+IDENTITY    := Funk Signing
 VERSION     := $(or $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//'),dev)
 BUILD_NUM   := $(or $(shell git rev-list --count HEAD 2>/dev/null),0)
 
-.PHONY: all app run install uninstall plugin clean check-tools
+.PHONY: all app dmg run install uninstall plugin clean check-tools
 
 all: app
 
@@ -35,6 +36,18 @@ app: check-tools
 	@echo "==> Signiere mit \"$(IDENTITY)\""
 	codesign --force --sign "$(IDENTITY)" --identifier "$(BUNDLE_ID)" "$(BUNDLE)"
 	@codesign --verify "$(BUNDLE)" && echo "==> $(BUNDLE) fertig"
+
+dmg: app
+	@echo "==> Packe DMG"
+	@rm -rf build/dmg "build/$(APP_NAME)-$(VERSION).dmg"
+	@mkdir -p build/dmg
+	@cp -R "$(BUNDLE)" build/dmg/
+	@ln -s /Applications build/dmg/Programme
+	hdiutil create -volname "$(APP_NAME) $(VERSION)" -srcfolder build/dmg -ov -format UDZO \
+		"build/$(APP_NAME)-$(VERSION).dmg"
+	codesign --force --sign "$(IDENTITY)" "build/$(APP_NAME)-$(VERSION).dmg"
+	@rm -rf build/dmg
+	@echo "==> build/$(APP_NAME)-$(VERSION).dmg fertig"
 
 run: app
 	-@pkill -x $(APP_NAME); sleep 0.5
@@ -57,7 +70,7 @@ uninstall:
 	-@defaults delete $(BUNDLE_ID) 2>/dev/null
 	-@tccutil reset Microphone $(BUNDLE_ID) >/dev/null 2>&1
 	@echo "Entfernt. Das Stream-Deck-Plugin per Rechtsklick in der Stream-Deck-App deinstallieren."
-	@echo "Das Signaturzertifikat bleibt im Schlüsselbund (\"$(IDENTITY)\") und kann dort gelöscht werden."
+	@echo "Das Signaturzertifikat \"$(IDENTITY)\" bleibt im Schlüsselbund."
 
 plugin:
 	cd plugin && npm ci && npm run build && npx streamdeck validate de.schuchert.funk.sdPlugin

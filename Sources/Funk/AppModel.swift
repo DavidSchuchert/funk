@@ -82,6 +82,12 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Außerhalb von /Applications (direkt aus dem DMG oder aus Downloads gestartet) verschiebt
+    /// macOS die App in einen zufälligen Pfad (App Translocation). Dann klappt das Login-Objekt nicht.
+    var isInApplications: Bool {
+        Bundle.main.bundleURL.path.hasPrefix("/Applications/")
+    }
+
     var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }

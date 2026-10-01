@@ -1,44 +1,30 @@
 #!/bin/bash
-# Legt einmalig ein selbst signiertes Code-Signing-Zertifikat im Login-Schlüsselbund an.
+# Stellt sicher, dass das Code-Signing-Zertifikat existiert.
 #
 # Warum: macOS merkt sich die Mikrofonfreigabe an der "Designated Requirement" der App.
-# Bei ad-hoc-Signatur ändert die sich mit jedem Build, und macOS fragt nach jedem Update neu.
-# Mit festem Zertifikat bleibt die Freigabe über Updates hinweg erhalten.
+# Bei ad-hoc-Signatur ändert die sich mit jedem Build. Mit festem Zertifikat bleibt die
+# Freigabe über Updates hinweg erhalten.
+#
+# Gesucht wird in allen Schlüsselbunden der Suchliste. In CI ist das importierte
+# Release-Zertifikat dabei, auf einem Mac evtl. eins aus create-signing-certificate.sh.
+# Nur wenn keins da ist, wird lokal eins angelegt (reicht für make install).
 set -euo pipefail
 
 NAME="$1"
-KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
-
-if security find-identity -p codesigning "$KEYCHAIN" 2>/dev/null | grep -q "\"$NAME\""; then
+if security find-identity -p codesigning 2>/dev/null | grep -q "\"$NAME\""; then
   exit 0
 fi
+if [ -n "${CI:-}" ]; then
+  echo "Fehler: Zertifikat \"$NAME\" nicht im Schlüsselbund. Secret FUNK_SIGNING_P12 gesetzt?" >&2
+  exit 1
+fi
 
-echo "==> Lege lokales Signaturzertifikat \"$NAME\" an (nur beim ersten Mal)"
+echo "==> Kein Zertifikat \"$NAME\" gefunden, lege ein lokales an (nur für make install)"
+echo "    Hinweis: Mit dem Release-Zertifikat (scripts/create-signing-certificate.sh) wären"
+echo "    lokale Builds und DMG-Versionen für macOS dieselbe App."
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-
-cat > "$TMP/openssl.cnf" <<CNF
-[req]
-distinguished_name = dn
-x509_extensions = ext
-prompt = no
-[dn]
-CN = $NAME
-[ext]
-basicConstraints = critical,CA:false
-keyUsage = critical,digitalSignature
-extendedKeyUsage = critical,codeSigning
-CNF
-
-# Bewusst /usr/bin/openssl (LibreSSL von Apple): Ein OpenSSL 3 aus Homebrew erzeugt
-# PKCS#12-Dateien, die `security import` ohne -legacy nicht lesen kann.
-OPENSSL=/usr/bin/openssl
-PASS="funk-$$"
-$OPENSSL req -x509 -newkey rsa:2048 -nodes -days 3650 -sha256 \
-  -keyout "$TMP/key.pem" -out "$TMP/cert.pem" -config "$TMP/openssl.cnf" 2>/dev/null
-$OPENSSL pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
-  -name "$NAME" -out "$TMP/identity.p12" -passout "pass:$PASS"
-
-# -T erlaubt codesign den Schlüsselzugriff ohne Nachfrage.
-security import "$TMP/identity.p12" -k "$KEYCHAIN" -P "$PASS" -T /usr/bin/codesign >/dev/null
+"$(dirname "$0")/make-certificate.sh" "$NAME" "$TMP"
+security import "$TMP/funk-signing.p12" -k "$HOME/Library/Keychains/login.keychain-db" \
+  -P "$(cat "$TMP/password.txt")" -T /usr/bin/codesign >/dev/null
 echo "    Fertig. Falls macOS beim Signieren nach dem Schlüsselbund fragt: \"Immer erlauben\"."

@@ -1,0 +1,9 @@
+# Skripte und Makefile immer mit LF, auch beim Auschecken unter Windows.
+# Bash bricht bei CRLF mit "$'\r': command not found" ab.
+*.sh      text eol=lf
+Makefile  text eol=lf
+*.swift   text eol=lf
+*.yml     text eol=lf
+*.icns    binary
+*.png     binary
+*.streamDeckPlugin binary

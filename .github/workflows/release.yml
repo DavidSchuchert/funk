@@ -1,0 +1,57 @@
+name: Release
+
+# Baut bei jedem Versions-Tag (v1.2.3) ein signiertes DMG und hängt es an ein GitHub-Release.
+#   git tag v1.1.0 && git push origin v1.1.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write          # Release anlegen
+
+jobs:
+  dmg:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # Tags und Historie für Versionsnummer und Build-Nummer
+
+      - name: Signaturzertifikat in temporären Schlüsselbund importieren
+        env:
+          P12: ${{ secrets.FUNK_SIGNING_P12 }}
+          P12_PASSWORD: ${{ secrets.FUNK_SIGNING_PASSWORD }}
+        run: |
+          if [ -z "$P12" ] || [ -z "$P12_PASSWORD" ]; then
+            echo "::error::Secrets FUNK_SIGNING_P12 / FUNK_SIGNING_PASSWORD fehlen. Einmalig scripts/create-signing-certificate.sh ausführen."
+            exit 1
+          fi
+          KEYCHAIN="$RUNNER_TEMP/funk.keychain-db"
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/funk.p12"
+          security import "$RUNNER_TEMP/funk.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/funk.p12"
+          # Ohne das fragt codesign per Dialog nach dem Schlüssel, und in CI klickt niemand.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security find-identity -p codesigning
+
+      - name: DMG bauen
+        env:
+          CI: "1"
+        run: make dmg
+
+      - name: Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/Funk-*.dmg \
+            --title "Funk ${GITHUB_REF_NAME#v}" \
+            --notes-file .github/release-notes.md
+
+      - name: Schlüsselbund aufräumen
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/funk.keychain-db" || true

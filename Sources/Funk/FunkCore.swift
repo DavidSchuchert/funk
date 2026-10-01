@@ -91,11 +91,11 @@ final class FunkCore {
         let on = control.talking || hotkeyDown
         if on != talking {
             talking = on
-            note(on ? "Sende" : "Senden beendet")
             link.talking = on
             link.sendStatus()                   // sofort, damit der Piep drüben vor der Stimme kommt
             audio.sendEnabled.value = on
-            if on { audio.touch() }
+            if on { audio.touch(); note("Sende") }
+            else { note("Senden beendet: \(audio.sendReport())") }
         }
         tick(reschedule: false)
     }

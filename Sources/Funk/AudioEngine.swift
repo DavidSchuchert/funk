@@ -21,8 +21,14 @@ final class AudioEngine {
 
     // Tap-Thread
     private var converter: AVAudioConverter?
+    private var monoFormat: AVAudioFormat?
     private var sendAccum = Data()
     let sendEnabled = AtomicFlag()
+
+    // Diagnose (funkQueue): pro Sende- bzw. Empfangsphase gezählt, beim Ende geloggt
+    private var sentPackets = 0
+    private var sentPeak: Float = 0
+    private var receivedPackets = 0
 
     /// Wie die Engine betrieben wird. Voice Processing scheitert unter macOS, wenn Ein- und
     /// Ausgabegerät nicht zusammenpassen (z. B. AirPods-Mikro + MacBook-Lautsprecher, Fehler -10875).
@@ -119,6 +125,7 @@ final class AudioEngine {
         }
         note("Modus \(mode.rawValue), Eingang: \(inFormat), Ausgang: \(engine.outputNode.outputFormat(forBus: 0))")
         converter = nil
+        monoFormat = nil
         sendAccum.removeAll()
         guard inFormat.sampleRate > 0, inFormat.channelCount > 0 else {
             // Ohne Mikrofonfreigabe oder Eingabegerät. installTap würde hier abstürzen.
@@ -126,7 +133,12 @@ final class AudioEngine {
             engine.prepare()
             return
         }
-        converter = AVAudioConverter(from: inFormat, to: wireFormat)
+        // Mit Voice Processing meldet macOS teils ein Format mit den Kanälen ALLER Eingabegeräte
+        // (z. B. 9 Kanäle). Welcher davon das Mikro ist, wissen wir nicht. Deshalb erst alle
+        // Kanäle zu Mono summieren, dann resamplen. Ein Konverter N->1 nähme nur Kanal 0.
+        let mono = AVAudioFormat(standardFormatWithSampleRate: inFormat.sampleRate, channels: 1)!
+        monoFormat = mono
+        converter = AVAudioConverter(from: mono, to: wireFormat)
         input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(Funk.packetFrames), format: inFormat) { [weak self] buf, _ in
             self?.captured(buf)
         }
@@ -148,7 +160,7 @@ final class AudioEngine {
     // MARK: Aufnahme (Tap-Thread)
 
     private func captured(_ buf: AVAudioPCMBuffer) {
-        guard sendEnabled.value, let conv = converter else {
+        guard sendEnabled.value, let conv = converter, let mono = downmix(buf) else {
             if !sendAccum.isEmpty { sendAccum.removeAll() }
             return
         }
@@ -162,20 +174,53 @@ final class AudioEngine {
             if fed { inStatus.pointee = .noDataNow; return nil }
             fed = true
             inStatus.pointee = .haveData
-            return buf
+            return mono.buffer
         }
         guard status != .error, err == nil, out.frameLength > 0, let ch = out.int16ChannelData else { return }
 
         sendAccum.append(Data(bytes: ch[0], count: Int(out.frameLength) * 2))
         let packetBytes = Funk.packetFrames * 2
+        let peak = mono.peak
         while sendAccum.count >= packetBytes {
             let chunk = Data(sendAccum.prefix(packetBytes))
             sendAccum.removeFirst(packetBytes)
             funkQueue.async { [weak self] in
-                self?.lastActivity = Date()
-                self?.onPacket?(chunk)
+                guard let self else { return }
+                self.lastActivity = Date()
+                self.sentPackets += 1
+                self.sentPeak = max(self.sentPeak, peak)
+                self.onPacket?(chunk)
             }
         }
+    }
+
+    /// Alle Kanäle zu Mono summieren (nicht mitteln: stille Kanäle sollen das Mikro nicht leiser machen).
+    private func downmix(_ buf: AVAudioPCMBuffer) -> (buffer: AVAudioPCMBuffer, peak: Float)? {
+        guard let mono = monoFormat, let src = buf.floatChannelData, buf.frameLength > 0,
+              let out = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: buf.frameLength),
+              let dst = out.floatChannelData?[0] else { return nil }
+        let n = Int(buf.frameLength)
+        let channels = Int(buf.format.channelCount)
+        let stride = buf.format.isInterleaved ? channels : 1
+        out.frameLength = buf.frameLength
+        var peak: Float = 0
+        for i in 0..<n {
+            var s: Float = 0
+            for c in 0..<channels {
+                s += buf.format.isInterleaved ? src[0][i * stride + c] : src[c][i]
+            }
+            s = max(-1, min(1, s))
+            dst[i] = s
+            peak = max(peak, abs(s))
+        }
+        return (out, peak)
+    }
+
+    /// Diagnose nach einer Sendung: Pakete und Spitzenpegel seit dem letzten Aufruf.
+    func sendReport() -> String {
+        defer { sentPackets = 0; sentPeak = 0 }
+        let db = sentPeak > 0 ? String(format: "%.0f dBFS", 20 * log10(sentPeak)) : "stumm"
+        return "\(sentPackets) Pakete gesendet, Spitze \(db)"
     }
 
     // MARK: Lebenszyklus (funkQueue)
@@ -236,6 +281,10 @@ final class AudioEngine {
         engine.stop()
         running = false
         queuedFrames = 0
+        if receivedPackets > 0 {
+            note("\(receivedPackets) Pakete empfangen und abgespielt")
+            receivedPackets = 0
+        }
     }
 
     // MARK: Wiedergabe (funkQueue)
@@ -243,6 +292,7 @@ final class AudioEngine {
     func play(_ pcm: Data) {
         touch()
         guard running, queuedFrames <= maxQueuedFrames else { return }
+        receivedPackets += 1
         if queuedFrames == 0, let lead = silence(leadInFrames) { scheduleVoice(lead) }
 
         let n = pcm.count / 2

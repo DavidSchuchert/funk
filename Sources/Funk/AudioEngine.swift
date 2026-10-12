@@ -22,12 +22,14 @@ final class AudioEngine {
     // Tap-Thread
     private var converter: AVAudioConverter?
     private var monoFormat: AVAudioFormat?
+    private var sendChannel = 0                    // welcher Eingangskanal gesendet wird
     private var sendAccum = Data()
     let sendEnabled = AtomicFlag()
 
     // Diagnose (funkQueue): pro Sende- bzw. Empfangsphase gezählt, beim Ende geloggt
     private var sentPackets = 0
     private var sentPeak: Float = 0
+    private var sentChannel = 0
     private var receivedPackets = 0
 
     /// Wie die Engine betrieben wird. Voice Processing scheitert unter macOS, wenn Ein- und
@@ -133,11 +135,13 @@ final class AudioEngine {
             engine.prepare()
             return
         }
-        // Mit Voice Processing meldet macOS teils ein Format mit den Kanälen ALLER Eingabegeräte
-        // (z. B. 9 Kanäle). Welcher davon das Mikro ist, wissen wir nicht. Deshalb erst alle
-        // Kanäle zu Mono summieren, dann resamplen. Ein Konverter N->1 nähme nur Kanal 0.
+        // Mit Voice Processing meldet macOS teils ein mehrkanaliges Format (gemessen: 9 Kanäle,
+        // alle exakte Kopien desselben Mono-Signals). Ein Konverter N->1 scheitert daran, und
+        // Summieren würde N-fach verstärken. Deshalb nehmen wir einen Kanal (den lautesten,
+        // falls es doch mal echte Einzelmikros sind) und resamplen den.
         let mono = AVAudioFormat(standardFormatWithSampleRate: inFormat.sampleRate, channels: 1)!
         monoFormat = mono
+        sendChannel = 0
         converter = AVAudioConverter(from: mono, to: wireFormat)
         input.installTap(onBus: 0, bufferSize: AVAudioFrameCount(Funk.packetFrames), format: inFormat) { [weak self] buf, _ in
             self?.captured(buf)
@@ -180,7 +184,7 @@ final class AudioEngine {
 
         sendAccum.append(Data(bytes: ch[0], count: Int(out.frameLength) * 2))
         let packetBytes = Funk.packetFrames * 2
-        let peak = mono.peak
+        let peak = mono.peak, channel = sendChannel
         while sendAccum.count >= packetBytes {
             let chunk = Data(sendAccum.prefix(packetBytes))
             sendAccum.removeFirst(packetBytes)
@@ -189,12 +193,14 @@ final class AudioEngine {
                 self.lastActivity = Date()
                 self.sentPackets += 1
                 self.sentPeak = max(self.sentPeak, peak)
+                self.sentChannel = channel
                 self.onPacket?(chunk)
             }
         }
     }
 
-    /// Alle Kanäle zu Mono summieren (nicht mitteln: stille Kanäle sollen das Mikro nicht leiser machen).
+    /// Einen Kanal als Mono herausziehen. Gewechselt wird nur, wenn ein anderer Kanal deutlich
+    /// (6 dB) lauter ist, damit zwei ähnliche Mikros nicht hin- und herflackern.
     private func downmix(_ buf: AVAudioPCMBuffer) -> (buffer: AVAudioPCMBuffer, peak: Float)? {
         guard let mono = monoFormat, let src = buf.floatChannelData, buf.frameLength > 0,
               let out = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: buf.frameLength),
@@ -202,25 +208,28 @@ final class AudioEngine {
         let n = Int(buf.frameLength)
         let channels = Int(buf.format.channelCount)
         let stride = buf.format.isInterleaved ? channels : 1
-        out.frameLength = buf.frameLength
-        var peak: Float = 0
-        for i in 0..<n {
-            var s: Float = 0
-            for c in 0..<channels {
-                s += buf.format.isInterleaved ? src[0][i * stride + c] : src[c][i]
-            }
-            s = max(-1, min(1, s))
-            dst[i] = s
-            peak = max(peak, abs(s))
+        func sample(_ c: Int, _ i: Int) -> Float { buf.format.isInterleaved ? src[0][i * stride + c] : src[c][i] }
+
+        var peaks = [Float](repeating: 0, count: channels)
+        for c in 0..<channels {
+            for i in 0..<n { peaks[c] = max(peaks[c], abs(sample(c, i))) }
         }
-        return (out, peak)
+        if sendChannel >= channels { sendChannel = 0 }
+        if let loudest = peaks.indices.max(by: { peaks[$0] < peaks[$1] }),
+           peaks[loudest] > peaks[sendChannel] * 2 {
+            sendChannel = loudest
+        }
+
+        out.frameLength = buf.frameLength
+        for i in 0..<n { dst[i] = max(-1, min(1, sample(sendChannel, i))) }
+        return (out, peaks[sendChannel])
     }
 
     /// Diagnose nach einer Sendung: Pakete und Spitzenpegel seit dem letzten Aufruf.
     func sendReport() -> String {
         defer { sentPackets = 0; sentPeak = 0 }
         let db = sentPeak > 0 ? String(format: "%.0f dBFS", 20 * log10(sentPeak)) : "stumm"
-        return "\(sentPackets) Pakete gesendet, Spitze \(db)"
+        return "\(sentPackets) Pakete gesendet, Spitze \(db), Kanal \(sentChannel)"
     }
 
     // MARK: Lebenszyklus (funkQueue)

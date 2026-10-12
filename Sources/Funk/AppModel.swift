@@ -109,8 +109,8 @@ final class AppModel: ObservableObject {
     }
 
     private func requestMicrophone() {
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
-            Task { @MainActor [weak self] in
+        AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
+            Task { @MainActor in
                 guard let self else { return }
                 self.micDenied = !granted
                 if !granted { warn("Mikrofon nicht freigegeben") }

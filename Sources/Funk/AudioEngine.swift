@@ -32,18 +32,20 @@ final class AudioEngine {
     private var sentChannel = 0
     private var receivedPackets = 0
 
-    /// Wie die Engine betrieben wird. Voice Processing scheitert unter macOS, wenn Ein- und
-    /// Ausgabegerät nicht zusammenpassen (z. B. AirPods-Mikro + MacBook-Lautsprecher, Fehler -10875).
-    /// Dann fallen wir stufenweise zurück, statt stumm zu bleiben.
+    /// Wie die Engine betrieben wird. Voice Processing verlangt unter macOS auf Ein- und
+    /// Ausgabeseite dieselbe Abtastrate, sonst scheitert der Start mit -10875 (gemessen: Rode
+    /// mit 48 kHz, MacBook-Lautsprecher mit 44,1 kHz). Deshalb Stereo mit der Eingangsrate,
+    /// dann Standardformat, dann ohne VP, statt stumm zu bleiben.
     enum Mode: String {
-        case voiceProcessing          // normal: Echo Cancellation + Ducking
-        case voiceProcessingMatched   // VP, Ausgabeformat ans Eingangsformat angeglichen
+        case voiceProcessing          // normal: Echo Cancellation + Ducking, Ausgang stereo mit Eingangsrate
+        case voiceProcessingDefault   // VP mit Standard-Ausgabeformat (falls Stereo/Eingangsrate nicht geht)
         case plain                    // ohne VP: Ton geht, aber kein Echo-Schutz, kein Ducking
     }
 
     // funkQueue
     private(set) var mode: Mode = .voiceProcessing
     private(set) var failed = false               // auch der letzte Rückfall hat nicht geklappt
+    private var retryNotBefore = Date.distantPast  // nach Fehlschlag nicht bei jedem Paket neu starten
     private var ignoreConfigChangesUntil = Date.distantPast
     private(set) var running = false
     private var queuedFrames: AVAudioFrameCount = 0
@@ -119,9 +121,11 @@ final class AudioEngine {
 
         let inFormat = input.outputFormat(forBus: 0)
         engine.disconnectNodeInput(engine.outputNode)
-        if mode == .voiceProcessingMatched, inFormat.sampleRate > 0 {
-            // VP verlangt gleiche Client-Formate für Ein- und Ausgabe.
-            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: inFormat)
+        if mode == .voiceProcessing, inFormat.sampleRate > 0,
+           let stereo = AVAudioFormat(standardFormatWithSampleRate: inFormat.sampleRate, channels: 2) {
+            // Gleiche Abtastrate wie der Eingang, sonst -10875. Bewusst Stereo und nicht das
+            // Eingangsformat: Bei dessen 9 Kanälen landet Mono nur auf Kanal 0, also nur links.
+            engine.connect(engine.mainMixerNode, to: engine.outputNode, format: stereo)
         } else {
             engine.connect(engine.mainMixerNode, to: engine.outputNode, format: nil)
         }
@@ -152,10 +156,16 @@ final class AudioEngine {
     private func configurationChanged() {
         guard Date() >= ignoreConfigChangesUntil else { return }
         note("Audiogeräte geändert, versuche es wieder mit Voice Processing")
+        rebuild()
+    }
+
+    /// Alles auf Anfang: neue Geräte, neue Chance mit Voice Processing.
+    private func rebuild() {
         let wasRunning = running
         stop()
-        mode = .voiceProcessing          // neue Geräte, neue Chance
+        mode = .voiceProcessing
         failed = false
+        retryNotBefore = .distantPast
         setVoiceProcessing(true)
         wireGraph()
         if wasRunning || keepAlive() { touch() }
@@ -236,23 +246,25 @@ final class AudioEngine {
 
     func touch() {
         lastActivity = Date()
-        guard !running else { return }
+        guard !running, Date() >= retryNotBefore else { return }
         if tryStart() { return }
         ignoreConfigChangesUntil = Date().addingTimeInterval(1)   // fehlgeschlagene Starts melden auch Änderungen
 
         // Rückfallkette. Ein Modus, der einmal geklappt hat, bleibt bis zum nächsten Gerätewechsel.
         if mode == .voiceProcessing {
-            mode = .voiceProcessingMatched
+            mode = .voiceProcessingDefault
             wireGraph()
             if tryStart() { return }
         }
-        if mode == .voiceProcessingMatched {
+        if mode == .voiceProcessingDefault {
             mode = .plain
             setVoiceProcessing(false)
             wireGraph()
             if tryStart() { return }
         }
+        // Sonst käme bei jedem empfangenen Paket (100/s) ein neuer Startversuch samt Log-Zeile.
         failed = true
+        retryNotBefore = Date().addingTimeInterval(3)
     }
 
     private func tryStart() -> Bool {
@@ -275,6 +287,13 @@ final class AudioEngine {
     private func scheduleIdleCheck() {
         funkQueue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self, self.running else { return }
+            if !self.engine.isRunning {
+                // Die Engine hat sich selbst gestoppt (Gerät weg), und die Meldung dazu fiel in
+                // ein Ignorier-Fenster. Sonst würden wir ewig auf eine tote Engine schedulen.
+                warn("Engine steht unerwartet, baue neu auf")
+                self.rebuild()
+                return
+            }
             if !self.keepAlive() && Date().timeIntervalSince(self.lastActivity) > Funk.hangTime {
                 self.stop()
                 note("Engine aus")
